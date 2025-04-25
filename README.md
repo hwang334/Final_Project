@@ -38,7 +38,7 @@ The entry point for the game. Creates and runs the main game instance.
 
 ```python
 # Example usage
-python main.py
+python super_main.py
 ```
 
 ### constants.py
@@ -109,7 +109,7 @@ The main game logic:
 1. Clone the repository or download the source code
 2. Install PyGame: `pip install pygame`
 3. Create an `assets/cards` directory and add card images
-4. Run the game: `python main.py`
+4. Run the game: `python super_main.py`
 
 ## Card Assets
 
