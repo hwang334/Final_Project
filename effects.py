@@ -1,4 +1,4 @@
-# effects.py
+# effects.py 
 import pygame
 import random
 from constants import *
