@@ -2,8 +2,6 @@
 
 A multiplayer real-time Blackjack game implementation based on Flask and Socket.IO, supporting AI players, game records, and online gameplay.
 
-![Blackjack Game Screenshot](screenshot_path_here)
-
 ## Table of Contents
 
 - [Features](#features)
