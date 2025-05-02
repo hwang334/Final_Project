@@ -53,11 +53,7 @@ These three versions represent a progression in complexity and features:
 - Python 3.x for all versions
 - Additional requirements specific to each implementation (see individual READMEs)
 
-## License
-
-This project is licensed under the MIT License - see the LICENSE file for details.
 
 ## Acknowledgments
 
-- Thanks to everyone who contributed to these implementations
 - Inspired by the classic casino game Blackjack
