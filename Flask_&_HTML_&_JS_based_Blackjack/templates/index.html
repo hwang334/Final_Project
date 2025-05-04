@@ -1,0 +1,105 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blackjack Game Lobby</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+</head>
+<body>
+    <div class="container">
+        <header>
+            <h1>Blackjack Game Lobby</h1>
+        </header>
+        
+        <div class="lobby-container">
+            <div class="create-room-section">
+                <h2>Create/Join Room</h2>
+                <form id="create-room-form">
+                    <div class="form-group">
+                        <label for="player-name">Your Name:</label>
+                        <input type="text" id="player-name" name="player-name" placeholder="Please enter your name">
+                    </div>
+                    <div class="form-group">
+                        <label for="room-name">Room Name:</label>
+                        <input type="text" id="room-name" name="room-name" placeholder="Please enter room name (optional)">
+                    </div>
+                    <button type="button" id="create-room-btn" class="btn primary-btn">Create Room</button>
+                </form>
+            </div>
+            
+            <div class="rooms-section">
+                <div class="rooms-header">
+                    <h2>Available Rooms</h2>
+                    <button id="refresh-btn" class="btn secondary-btn">Refresh</button>
+                </div>
+                <div id="rooms-container" class="rooms-list">
+                    <!-- Room list will be dynamically generated here -->
+                    <div class="loading">Loading...</div>
+                </div>
+            </div>
+        </div>
+        
+        {% if ngrok_url and config.get("NGROK_AVAILABLE", False) %}
+        <div class="ngrok-info">
+            <h3>Share Game Link</h3>
+            <p>Your friends can join the game from any network through the following link:</p>
+            <div class="ngrok-url">{{ ngrok_url }}</div>
+            <button id="copy-url-btn" class="btn secondary-btn">Copy Link</button>
+        </div>
+
+        <script>
+        // Add copy link functionality
+        document.getElementById('copy-url-btn').addEventListener('click', function() {
+            const url = document.querySelector('.ngrok-url').textContent;
+            navigator.clipboard.writeText(url).then(() => {
+                alert('Link copied to clipboard!');
+            }).catch(err => {
+                console.error('Copy failed:', err);
+                // Fallback method
+                const textArea = document.createElement('textarea');
+                textArea.value = url;
+                document.body.appendChild(textArea);
+                textArea.select();
+                document.execCommand('copy');
+                document.body.removeChild(textArea);
+                alert('Link copied to clipboard!');
+            });
+        });
+        </script>
+        {% endif %}
+        
+        <div class="game-rules">
+            <h2>Game Rules</h2>
+            <div class="rules-content">
+                <h3>Blackjack Basic Rules:</h3>
+                <ul>
+                    <li>Each player competes against the dealer, the goal is to have cards with a total value as close to 21 as possible without exceeding 21</li>
+                    <li>Number cards are worth their face value, J, Q, K are worth 10 points, A can be worth 1 or 11 points</li>
+                    <li>Game process: Betting → Dealing → Player action → Dealer action → Settlement</li>
+                    <li>Players can choose to "Hit" or "Stand"</li>
+                    <li>If a player busts (exceeds 21 points), they immediately lose their bet</li>
+                    <li>The dealer must hit until their total is 17 or higher</li>
+                    <li>Winning conditions:
+                        <ul>
+                            <li>Player's total is higher than the dealer's and doesn't bust</li>
+                            <li>Player doesn't bust, dealer busts</li>
+                            <li>Player gets Blackjack (an A plus 10, J, Q or K, totaling 21 with first two cards)</li>
+                        </ul>
+                    </li>
+                </ul>
+                
+                <h3>Special Rules:</h3>
+                <ul>
+                    <li><strong>Blackjack:</strong> First two cards totaling 21 points, pays 1.5x</li>
+                    <li><strong>Double Down:</strong> After first two cards, can double the bet but can only take one more card</li>
+                    <li><strong>Five Dragon:</strong> Having 5 cards without busting instantly wins, pays 2x</li>
+                </ul>
+            </div>
+        </div>
+    </div>
+    
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+    <script src="{{ url_for('static', filename='js/lobby.js') }}"></script>
+</body>
+</html>

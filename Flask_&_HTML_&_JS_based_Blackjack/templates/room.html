@@ -1,0 +1,629 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Blackjack Game Room</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='css/style.css') }}">
+    <script src="https://cdn.jsdelivr.net/npm/vue@2.6.14/dist/vue.js"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/socket.io/4.0.1/socket.io.js"></script>
+</head>
+<body>
+    <div class="container" id="app">
+        <header>
+            <h1>Blackjack Game Room</h1>
+        </header>
+        
+        <div v-if="!connected" class="loading">
+            Connecting...please wait...
+        </div>
+        
+        <div v-else class="game-room">
+            <div class="room-header">
+                <h2>${roomName}</h2>
+                <div class="room-status">Game status: ${getGameStateText(gameState)}</div>
+                <button @click="leaveRoom" class="btn danger-btn">Leave Room</button>
+            </div>
+            
+            <!-- Room link sharing area -->
+            <div class="share-room-section">
+                <h3>Invite friends to join</h3>
+                <div class="room-url-container">
+                    <input type="text" class="room-url" readonly :value="getRoomUrl()" ref="roomUrlInput">
+                    <button @click="copyRoomUrl" class="btn secondary-btn">Copy Link</button>
+                </div>
+            </div>
+            
+            <div class="game-message" v-if="message">
+                ${message}
+            </div>
+            
+            <!-- Ready button area - when game state is waiting -->
+            <div v-if="gameState === 'waiting'" class="ready-controls">
+                <button 
+                    @click="toggleReady" 
+                    class="btn" 
+                    :class="players[currentPlayerId] && players[currentPlayerId].state === 'ready' ? 'secondary-btn' : 'primary-btn'">
+                    ${players[currentPlayerId] && players[currentPlayerId].state === 'ready' ? 'Cancel Ready' : 'Ready'}
+                </button>
+            </div>
+            
+            <!-- Dealer area -->
+            <div class="dealer-section">
+                <div class="player-info">
+                    <div class="player-name">Dealer</div>
+                    <div class="player-score">Score: ${dealerScore}</div>
+                </div>
+                <div class="dealer-hand">
+                    <div v-for="(card, index) in dealer.hand" :key="index" 
+                         class="card" 
+                         :class="getCardClass(card)">
+                        ${index === 1 && gameState !== 'game_over' && gameState !== 'dealer_turn' ? '?' : card.suit + card.value}
+                    </div>
+                </div>
+            </div>
+            
+            <!-- Current player turn info -->
+            <div v-if="gameState === 'playing' && playerOrder.length > 0" class="current-turn-info">
+                It's <span class="current-player-name">${getCurrentPlayerName()}</span>'s turn
+            </div>
+            
+            <!-- Player area -->
+            <div v-for="(player, playerId) in players" :key="playerId" 
+                 class="player-section" 
+                 :class="{'current-player': isCurrentPlayer(playerId), 'busted': player.state === 'busted', 'blackjack': player.state === 'blackjack', 'ready': player.state === 'ready', 'ai-player': player.is_ai}">
+                <div class="player-info">
+                    <div class="player-name">${player.name} ${playerId === currentPlayerId ? '(you)' : ''} ${player.is_ai ? '(AI)' : ''}</div>
+                    <div class="player-money">Money: $${player.money}</div>
+                    <div class="player-bet" v-if="player.current_bet > 0">Bet: $${player.current_bet}</div>
+                    <div class="player-score">Score: ${player.score}</div>
+                    <div class="player-state" :class="player.state">Status: ${getPlayerStateText(player.state)}</div>
+                </div>
+                <div class="player-hand">
+                    <div v-for="(card, index) in player.hand" :key="index" 
+                         class="card" 
+                         :class="getCardClass(card)">
+                        ${card.suit + card.value}
+                    </div>
+                </div>
+                
+                <!-- Betting controls -->
+                <div v-if="gameState === 'betting' && playerId === currentPlayerId && player.state === 'betting'" class="bet-controls">
+                    <button @click="decreaseBet" class="btn secondary-btn">-</button>
+                    <input v-model.number="betAmount" type="number" min="1" :max="player.money">
+                    <button @click="increaseBet" class="btn secondary-btn">+</button>
+                    <button @click="placeBet" class="btn primary-btn">Bet</button>
+                </div>
+                
+                <!-- Game buttons - only show to current player and only when it's their turn -->
+                <div v-if="gameState === 'playing' && playerId === currentPlayerId && player.state === 'playing' && isCurrentPlayer(playerId)" class="action-buttons">
+                    <button @click="hit" class="btn primary-btn">Hit</button>
+                    <button @click="stand" class="btn secondary-btn">Stand</button>
+                    <button @click="doubleDown" class="btn success-btn" v-if="canDoubleDown(player)">Double Down</button>
+                </div>
+            </div>
+            
+            <!-- Game over next round button -->
+            <div v-if="gameState === 'game_over'" class="action-buttons">
+                <button @click="nextRound" class="btn primary-btn">Next Round</button>
+            </div>
+            
+            <!-- Notification -->
+            <div v-if="notification" class="notification-message" :class="{ 'show': showNotification }">
+                ${notification}
+            </div>
+            
+            <!-- Add AI player and game records control panel -->
+            <div class="control-panel">
+                <div class="panel-section ai-controls">
+                    <h3>AI Player Control</h3>
+                    <div class="ai-buttons">
+                        <select v-model="aiDifficulty" class="ai-difficulty">
+                            <option value="easy">Beginner</option>
+                            <option value="medium">Average Player</option>
+                            <option value="hard">Expert</option>
+                            <option value="expert">Master</option>
+                        </select>
+                        <button @click="addAIPlayer" class="btn primary-btn">Add AI Player</button>
+                    </div>
+                    <div class="ai-players" v-if="getAIPlayers().length > 0">
+                        <div v-for="player in getAIPlayers()" :key="player.player_id" class="ai-player-item">
+                            <span>${player.name} (${getAIDifficultyText(player.ai_difficulty)})</span>
+                            <button @click="removeAIPlayer(player.player_id)" class="btn danger-btn btn-sm">Remove</button>
+                        </div>
+                    </div>
+                </div>
+                
+                <div class="panel-section game-records">
+                    <h3>Game Records</h3>
+                    <button @click="toggleGameRecords" class="btn secondary-btn">
+                        ${showGameRecords ? 'Hide Records' : 'Show Records'}
+                    </button>
+                    
+                    <div v-if="showGameRecords" class="records-container">
+                        <div v-if="gameRecords.length === 0" class="no-records">
+                            No game records yet
+                        </div>
+                        <table v-else class="records-table">
+                            <thead>
+                                <tr>
+                                    <th>Time</th>
+                                    <th>Player</th>
+                                    <th>Result</th>
+                                    <th>Profit/Loss</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <tr v-for="record in gameRecords" :key="record.id">
+                                    <td>${record.date_time}</td>
+                                    <td>
+                                        <div v-for="(info, pid) in record.players" :key="pid">
+                                            ${info.name}
+                                        </div>
+                                    </td>
+                                    <td>${record.game_result}</td>
+                                    <td>
+                                        <div v-for="(info, pid) in record.players" :key="pid">
+                                            <span :class="{'win': info.win_loss > 0, 'loss': info.win_loss < 0}">
+                                                ${info.win_loss > 0 ? '+' : ''}${info.win_loss}
+                                            </span>
+                                        </div>
+                                    </td>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                
+                <div class="panel-section player-stats">
+                    <h3>My Stats</h3>
+                    <button @click="loadPlayerStats" class="btn secondary-btn">Refresh Stats</button>
+                    
+                    <div v-if="playerStats" class="stats-container">
+                        <div class="stat-row">
+                            <span>Games Played:</span>
+                            <span>${playerStats.games_played}</span>
+                        </div>
+                        <div class="stat-row">
+                            <span>Wins:</span>
+                            <span>${playerStats.wins}</span>
+                        </div>
+                        <div class="stat-row">
+                            <span>Losses:</span>
+                            <span>${playerStats.losses}</span>
+                        </div>
+                        <div class="stat-row">
+                            <span>Win Rate:</span>
+                            <span>${playerStats.win_rate.toFixed(1)}%</span>
+                        </div>
+                        <div class="stat-row">
+                            <span>Total Profit/Loss:</span>
+                            <span :class="{'win': playerStats.total_profit > 0, 'loss': playerStats.total_profit < 0}">
+                                ${playerStats.total_profit > 0 ? '+' : ''}${playerStats.total_profit}
+                            </span>
+                        </div>
+                        <div class="stat-row">
+                            <span>Blackjack Times:</span>
+                            <span>${playerStats.blackjacks}</span>
+                        </div>
+                        <div class="stat-row">
+                            <span>Bust Times:</span>
+                            <span>${playerStats.busts}</span>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <script>
+        // URL parameter getter function
+        function getUrlParameter(name) {
+            name = name.replace(/[\[]/, '\\[').replace(/[\]]/, '\\]');
+            var regex = new RegExp('[\\?&]' + name + '=([^&#]*)');
+            var results = regex.exec(location.search);
+            return results === null ? '' : decodeURIComponent(results[1].replace(/\+/g, ' '));
+        }
+        
+        // Main application
+        new Vue({
+            el: '#app',
+            delimiters: ['${', '}'],
+            data: {
+                socket: null,
+                connected: false,
+                roomId: '{{ room_id }}',
+                roomName: '',
+                gameState: 'waiting',
+                players: {},
+                dealer: { hand: [], score: 0 },
+                currentPlayerId: '',
+                currentPlayerIndex: 0,
+                playerOrder: [],
+                message: '',
+                betAmount: 100,
+                playerName: localStorage.getItem('playerName') || '',
+                sessionId: localStorage.getItem('sessionId') || '',
+                notification: '',
+                showNotification: false,
+                aiDifficulty: 'medium',
+                gameRecords: [],
+                showGameRecords: false,
+                playerStats: null
+            },
+            computed: {
+                dealerScore() {
+                    if (this.gameState === 'game_over' || this.gameState === 'dealer_turn') {
+                        return this.dealer.score;
+                    }
+                    return this.dealer.hand.length > 0 ? this.dealer.score : 0;
+                }
+            },
+            mounted() {
+                // If no player name, return to lobby
+                if (!this.playerName) {
+                    this.playerName = prompt('Please enter your name:');
+                    if (!this.playerName) {
+                        window.location.href = '/';
+                        return;
+                    }
+                    localStorage.setItem('playerName', this.playerName);
+                }
+                
+                // Connect Socket.IO
+                this.connectSocket();
+                
+                // Load game records and player stats
+                this.loadGameRecords();
+                this.loadPlayerStats();
+            },
+            methods: {
+                // Connect Socket.IO
+                connectSocket() {
+                    const url = window.location.origin;
+                    let connectionOptions = {};
+                    
+                    // If there's a session ID, add to query parameters
+                    if (this.sessionId) {
+                        connectionOptions.query = { session_id: this.sessionId };
+                    }
+                    
+                    this.socket = io(url, connectionOptions);
+                    
+                    // Connection events
+                    this.socket.on('connect', () => {
+                        this.connected = true;
+                        this.currentPlayerId = this.socket.id;
+                        this.joinRoom();
+                    });
+                    
+                    // Set session ID
+                    this.socket.on('set_session_id', (data) => {
+                        this.sessionId = data.session_id;
+                        localStorage.setItem('sessionId', this.sessionId);
+                    });
+                    
+                    // Room data update
+                    this.socket.on('room_data', (data) => {
+                        this.updateRoomData(data);
+                    });
+                    
+                    // Game update
+                    this.socket.on('game_update', (data) => {
+                        this.updateRoomData(data);
+                        
+                        // If game state becomes game_over, refresh game records
+                        if (data.game_state === 'game_over') {
+                            setTimeout(() => {
+                                this.loadGameRecords();
+                                this.loadPlayerStats();
+                            }, 1000);
+                        }
+                    });
+                    
+                    // Player status update
+                    this.socket.on('player_status_update', (data) => {
+                        if (this.players[data.player_id]) {
+                            this.players[data.player_id].state = data.player_state;
+                        }
+                    });
+                    
+                    // Player joined
+                    this.socket.on('player_joined', (data) => {
+                        this.players[data.player.player_id] = data.player;
+                    });
+                    
+                    // Player left
+                    this.socket.on('player_left', (data) => {
+                        this.$delete(this.players, data.player_id);
+                    });
+                    
+                    // Notification message
+                    this.socket.on('notification', (data) => {
+                        this.showNotificationMessage(data.message);
+                    });
+                    
+                    // Error handling
+                    this.socket.on('error', (data) => {
+                        alert(data.message);
+                    });
+                },
+                
+                // Show notification message
+                showNotificationMessage(message) {
+                    this.notification = message;
+                    this.showNotification = true;
+                    
+                    // Auto-hide after 3 seconds
+                    setTimeout(() => {
+                        this.showNotification = false;
+                    }, 3000);
+                },
+                
+                // Get room URL
+                getRoomUrl() {
+                    return window.location.href;
+                },
+                
+                // Copy room URL
+                copyRoomUrl() {
+                    const roomUrlInput = this.$refs.roomUrlInput;
+                    roomUrlInput.select();
+                    document.execCommand('copy');
+                    
+                    this.showNotificationMessage('Room link copied to clipboard!');
+                },
+                
+                // Join room
+                joinRoom() {
+                    this.socket.emit('join_room', {
+                        room_id: this.roomId,
+                        player_name: this.playerName
+                    });
+                },
+                
+                // Leave room
+                leaveRoom() {
+                    this.socket.emit('leave_room', {
+                        room_id: this.roomId
+                    });
+                    window.location.href = '/';
+                },
+                
+                // Update room data
+                updateRoomData(data) {
+                    this.roomName = data.room_name;
+                    this.gameState = data.game_state;
+                    this.players = data.players;
+                    this.dealer = data.dealer;
+                    this.currentPlayerIndex = data.current_player_index;
+                    this.playerOrder = data.player_order;
+                    this.message = data.message;
+                },
+                
+                // Get current player name
+                getCurrentPlayerName() {
+                    if (this.gameState !== 'playing' || this.playerOrder.length === 0) {
+                        return "";
+                    }
+                    
+                    const currentPlayerId = this.playerOrder[this.currentPlayerIndex];
+                    if (this.players[currentPlayerId]) {
+                        return this.players[currentPlayerId].name;
+                    }
+                    
+                    return "";
+                },
+                
+                // Toggle ready/cancel ready
+                toggleReady() {
+                    this.socket.emit('player_ready', {
+                        room_id: this.roomId
+                    });
+                },
+                
+                // Check if current action player
+                isCurrentPlayer(playerId) {
+                    if (this.gameState !== 'playing') return false;
+                    if (this.playerOrder.length === 0) return false;
+                    const currentPlayerOrderId = this.playerOrder[this.currentPlayerIndex];
+                    return playerId === currentPlayerOrderId;
+                },
+                
+                // Get game state text
+                getGameStateText(state) {
+                    const stateMap = {
+                        'waiting': 'Waiting for Ready',
+                        'betting': 'Betting Phase',
+                        'playing': 'Game in Progress',
+                        'dealer_turn': "Dealer's Turn",
+                        'game_over': 'Game Over'
+                    };
+                    return stateMap[state] || state;
+                },
+                
+                // Get player state text
+                getPlayerStateText(state) {
+                    const stateMap = {
+                        'waiting': 'Waiting',
+                        'ready': 'Ready',
+                        'betting': 'Betting',
+                        'playing': 'Acting',
+                        'stand': 'Stand',
+                        'busted': 'Busted',
+                        'blackjack': 'Blackjack!',
+                        'five_dragon': 'Five Dragon!',
+                        'spectating': 'Spectating'
+                    };
+                    return stateMap[state] || state;
+                },
+                
+                // Increase bet amount
+                increaseBet() {
+                    const player = this.players[this.currentPlayerId];
+                    if (this.betAmount < player.money) {
+                        this.betAmount += 100;
+                    }
+                },
+                
+                // Decrease bet amount
+                decreaseBet() {
+                    if (this.betAmount > 100) {
+                        this.betAmount -= 100;
+                    }
+                },
+                
+                // Place bet
+                placeBet() {
+                    if (this.betAmount <= 0 || this.betAmount > this.players[this.currentPlayerId].money) {
+                        alert('Invalid bet amount!');
+                        return;
+                    }
+                    
+                    this.socket.emit('place_bet', {
+                        room_id: this.roomId,
+                        bet_amount: this.betAmount
+                    });
+                },
+                
+                // Hit
+                hit() {
+                    this.socket.emit('hit', {
+                        room_id: this.roomId
+                    });
+                },
+                
+                // Stand
+                stand() {
+                    this.socket.emit('stand', {
+                        room_id: this.roomId
+                    });
+                },
+                
+                // Double down
+                doubleDown() {
+                    this.socket.emit('double_down', {
+                        room_id: this.roomId
+                    });
+                },
+                
+                // Check if can double down
+                canDoubleDown(player) {
+                    return player.state === 'playing' && 
+                           player.hand.length === 2 && 
+                           player.money >= player.current_bet;
+                },
+                
+                // Next round
+                nextRound() {
+                    console.log("Starting next round");
+                    this.socket.emit('next_round', {
+                        room_id: this.roomId
+                    });
+                },
+                
+                // Get card CSS class
+                getCardClass(card) {
+                    if (card.suit === '♥') return 'heart';
+                    if (card.suit === '♦') return 'diamond';
+                    if (card.suit === '♠') return 'spade';
+                    if (card.suit === '♣') return 'club';
+                    return '';
+                },
+                
+                // AI player related methods
+                getAIPlayers() {
+                    return Object.values(this.players).filter(player => player.is_ai);
+                },
+                
+                getAIDifficultyText(difficulty) {
+                    const difficultyMap = {
+                        'easy': 'Beginner',
+                        'medium': 'Average Player',
+                        'hard': 'Expert',
+                        'expert': 'Master'
+                    };
+                    return difficultyMap[difficulty] || difficulty;
+                },
+                
+                addAIPlayer() {
+                    fetch('/api/add-ai-player', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            room_id: this.roomId,
+                            difficulty: this.aiDifficulty
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (!data.success) {
+                            alert(data.message || 'Failed to add AI player');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Add AI player error:', error);
+                        alert('Error adding AI player, see console for details');
+                    });
+                },
+                
+                removeAIPlayer(playerId) {
+                    fetch('/api/remove-ai-player', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            room_id: this.roomId,
+                            player_id: playerId
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (!data.success) {
+                            alert(data.message || 'Failed to remove AI player');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('Remove AI player error:', error);
+                        alert('Error removing AI player, see console for details');
+                    });
+                },
+                
+                // Game records related methods
+                loadGameRecords() {
+                    fetch(`/api/game-records/${this.roomId}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        this.gameRecords = data;
+                    })
+                    .catch(error => {
+                        console.error('Load game records error:', error);
+                    });
+                },
+                
+                toggleGameRecords() {
+                    this.showGameRecords = !this.showGameRecords;
+                    if (this.showGameRecords) {
+                        this.loadGameRecords();
+                    }
+                },
+                
+                // Player stats related methods
+                loadPlayerStats() {
+                    fetch(`/api/player-stats/${this.playerName}`)
+                    .then(response => response.json())
+                    .then(data => {
+                        this.playerStats = data;
+                    })
+                    .catch(error => {
+                        console.error('Load player stats error:', error);
+                    });
+                }
+            }
+        });
+    </script>
+</body>
+</html>
