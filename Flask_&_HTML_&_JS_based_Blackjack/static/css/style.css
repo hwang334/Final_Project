@@ -667,3 +667,22 @@ header h1 {
         flex-direction: column;
     }
 }
+
+/* qr Code */
+.qr-code-container {
+    margin-top: 15px;
+    text-align: center;
+}
+
+.room-qr-code {
+    max-width: 200px;
+    margin: 10px auto;
+    display: block;
+    border: 1px solid #ddd;
+    padding: 5px;
+    background-color: white;
+}
+
+.qr-code-btn {
+    margin-top: 10px;
+}
