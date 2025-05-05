@@ -32,6 +32,13 @@
                     <input type="text" class="room-url" readonly :value="getRoomUrl()" ref="roomUrlInput">
                     <button @click="copyRoomUrl" class="btn secondary-btn">Copy Link</button>
                 </div>
+
+                <!-- Add this new part for QR code -->
+                <div class="qr-code-container" v-if="qrCodeImage">
+                    <h4>Scan QR Code to Join</h4>
+                    <img :src="qrCodeImage" alt="Room QR Code" class="room-qr-code">
+                </div>
+                <button @click="generateQRCode" class="btn primary-btn qr-code-btn">Generate QR Code</button>
             </div>
             
             <div class="game-message" v-if="message">
@@ -249,7 +256,8 @@
                 aiDifficulty: 'medium',
                 gameRecords: [],
                 showGameRecords: false,
-                playerStats: null
+                playerStats: null,
+                qrCodeImage: null
             },
             computed: {
                 dealerScore() {
@@ -620,6 +628,33 @@
                     })
                     .catch(error => {
                         console.error('Load player stats error:', error);
+                    });
+                },
+
+                generateQRCode() {
+                    const roomUrl = this.getRoomUrl();
+                    
+                    fetch('/api/generate-qrcode', {
+                        method: 'POST',
+                        headers: {
+                            'Content-Type': 'application/json'
+                        },
+                        body: JSON.stringify({
+                            room_url: roomUrl
+                        })
+                    })
+                    .then(response => response.json())
+                    .then(data => {
+                        if (data.success) {
+                            this.qrCodeImage = data.qr_code;
+                            this.showNotificationMessage('QR Code generated successfully!');
+                        } else {
+                            alert(data.message || 'Failed to generate QR Code');
+                        }
+                    })
+                    .catch(error => {
+                        console.error('QR Code generation error:', error);
+                        alert('Error generating QR Code, see console for details');
                     });
                 }
             }
